@@ -1,0 +1,66 @@
+resources:
+  jobs:
+    Data_BI_Group_Assignment:
+      name: Data BI Group Assignment
+      email_notifications:
+        on_success:
+          - garg.pal@northeastern.edu
+        on_failure:
+          - garg.pal@northeastern.edu
+      tasks:
+        - task_key: 01_extract_from_source
+          notebook_task:
+            notebook_path: /Workspace/Users/garg.pal@northeastern.edu/BI Group
+              project/01_extract_from_source
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: 02_raw_to_bronze
+          depends_on:
+            - task_key: 01_extract_from_source
+          notebook_task:
+            notebook_path: /Workspace/Users/garg.pal@northeastern.edu/BI Group
+              project/02_raw_to_bronze
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: 03_bronze_to_silver
+          depends_on:
+            - task_key: 02_raw_to_bronze
+          notebook_task:
+            notebook_path: /Workspace/Users/garg.pal@northeastern.edu/BI Group
+              project/03_bronze_to_silver
+            source: WORKSPACE
+          environment_key: Default
+        - task_key: 04_silver_to_gold
+          depends_on:
+            - task_key: 03_bronze_to_silver
+          notebook_task:
+            notebook_path: /Workspace/Users/garg.pal@northeastern.edu/BI Group
+              project/04_silver_to_gold
+            source: WORKSPACE
+          environment_key: Default
+      queue:
+        enabled: true
+      parameters:
+        - name: catalog_name
+          default: workspace
+        - name: schema_name
+          default: pipeline_control
+        - name: control_schema
+          default: pipeline_control
+        - name: bronze_schema
+          default: bronze
+        - name: silver_schema
+          default: silver
+        - name: gold_schema
+          default: gold
+        - name: base_path
+          default: /Volumes/workspace/raw_zone/chinook
+        - name: source_catalog
+          default: chinook_source
+        - name: source_schema
+          default: chinook
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "5"
+      performance_target: PERFORMANCE_OPTIMIZED
