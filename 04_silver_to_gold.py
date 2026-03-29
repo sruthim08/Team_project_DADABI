@@ -1,6 +1,4 @@
 # Databricks notebook source
-
-# COMMAND ----------
 # MAGIC %md
 # MAGIC # 04 — Silver to Gold
 # MAGIC Builds the dimensional model from Silver tables.
@@ -29,13 +27,14 @@ catalog_name  = dbutils.widgets.get("catalog_name")
 silver_schema = dbutils.widgets.get("silver_schema")
 gold_schema   = dbutils.widgets.get("gold_schema")
 
-s = f"{catalog_name}.{silver_schema}"   # silver shorthand
-g = f"{catalog_name}.{gold_schema}"     # gold shorthand
+s = f"{catalog_name}.{silver_schema}"
+g = f"{catalog_name}.{gold_schema}"
 
 print(f"Silver : {s}")
 print(f"Gold   : {g}")
 
 # COMMAND ----------
+
 # MAGIC %md ## 1 — dim_date
 
 # COMMAND ----------
@@ -47,15 +46,15 @@ AS
 SELECT
     CAST(DATE_FORMAT(full_date, 'yyyyMMdd') AS INT)  AS date_key,
     full_date,
-    YEAR(full_date)                                  AS year,
-    QUARTER(full_date)                               AS quarter,
-    MONTH(full_date)                                 AS month,
-    DATE_FORMAT(full_date, 'MMMM')                  AS month_name,
-    DAY(full_date)                                   AS day,
-    DAYOFWEEK(full_date)                             AS day_of_week,
-    DATE_FORMAT(full_date, 'EEEE')                  AS day_name,
+    YEAR(full_date) AS year,
+    QUARTER(full_date) AS quarter,
+    MONTH(full_date) AS month,
+    DATE_FORMAT(full_date, 'MMMM') AS month_name,
+    DAY(full_date) AS day,
+    DAYOFWEEK(full_date) AS day_of_week,
+    DATE_FORMAT(full_date, 'EEEE') AS day_name,
     CASE WHEN DAYOFWEEK(full_date) IN (1,7)
-         THEN 'Y' ELSE 'N' END                       AS is_weekend
+         THEN 'Y' ELSE 'N' END AS is_weekend
 FROM (
     SELECT DISTINCT CAST(InvoiceDate AS DATE) AS full_date
     FROM {s}.invoice
@@ -68,6 +67,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_date").collect()[0]["c"]
 print(f"dim_date        : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## 2 — dim_artist
 
 # COMMAND ----------
@@ -87,6 +87,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_artist").collect()[0]["c"]
 print(f"dim_artist      : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## 3 — dim_album
 
 # COMMAND ----------
@@ -108,6 +109,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_album").collect()[0]["c"]
 print(f"dim_album       : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## 4 — dim_genre
 
 # COMMAND ----------
@@ -127,6 +129,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_genre").collect()[0]["c"]
 print(f"dim_genre       : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## 5 — dim_media_type
 
 # COMMAND ----------
@@ -146,6 +149,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_media_type").collect()[0]["c
 print(f"dim_media_type  : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## 6 — dim_employee
 
 # COMMAND ----------
@@ -176,6 +180,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_employee").collect()[0]["c"]
 print(f"dim_employee    : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## 7 — dim_customer (SCD Type 2)
 # MAGIC
 # MAGIC First run (Version 1): creates the table and inserts all customers
@@ -188,12 +193,13 @@ print(f"dim_employee    : {cnt} rows")
 
 from delta.tables import DeltaTable
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 from datetime import date
-
+ 
 # Columns we track for SCD2 changes
 SCD2_COLS = ["first_name","last_name","company","address","city",
              "state","country","postal_code","phone","email"]
-
+ 
 # Build the incoming Silver snapshot with surrogate-ready columns
 incoming_df = spark.sql(f"""
     SELECT
@@ -213,9 +219,9 @@ incoming_df = spark.sql(f"""
     FROM {s}.customer c
     LEFT JOIN {g}.dim_employee de ON c.SupportRepId = de.employee_id
 """)
-
+ 
 today = str(date.today())
-
+ 
 # ── Check if dim_customer already exists ─────────────────────────
 table_exists = spark.sql(f"""
     SELECT COUNT(*) AS c
@@ -224,62 +230,42 @@ table_exists = spark.sql(f"""
       AND table_schema   = '{gold_schema}'
       AND table_name     = 'dim_customer'
 """).collect()[0]["c"] > 0
-
+ 
 if not table_exists:
-    # ── FIRST RUN — create table and insert all as current ────────
+    # ── FIRST RUN — build entirely with DataFrame API ─────────────
     print("First run detected — creating dim_customer with all current records.")
-
-    spark.sql(f"""
-        CREATE TABLE {g}.dim_customer
-        USING DELTA
-        AS
-        SELECT
-            ROW_NUMBER() OVER (ORDER BY customer_id)  AS customer_key,
-            customer_id,
-            first_name, last_name, company, address,
-            city, state, country, postal_code,
-            phone, fax, email, support_rep_key,
-            CAST('{today}' AS DATE)  AS effective_start_date,
-            CAST(NULL      AS DATE)  AS effective_end_date,
-            TRUE                     AS is_current
-        FROM ({incoming_df.createOrReplaceTempView("incoming_customers")}
-              SELECT * FROM incoming_customers)
-    """)
-
-    # Simpler first-run approach
-    first_run_df = incoming_df.withColumn("effective_start_date", F.lit(today).cast("date")) \
-                              .withColumn("effective_end_date",   F.lit(None).cast("date")) \
-                              .withColumn("is_current",           F.lit(True))
-
-    # Add surrogate key
-    from pyspark.sql.window import Window
+ 
     w = Window.orderBy("customer_id")
-    first_run_df = first_run_df.withColumn("customer_key", F.row_number().over(w))
-
-    # Reorder columns
-    first_run_df = first_run_df.select(
-        "customer_key","customer_id","first_name","last_name",
-        "company","address","city","state","country","postal_code",
-        "phone","fax","email","support_rep_key",
-        "effective_start_date","effective_end_date","is_current"
+ 
+    first_run_df = (incoming_df
+        .withColumn("customer_key",         F.row_number().over(w))
+        .withColumn("effective_start_date",  F.lit(today).cast("date"))
+        .withColumn("effective_end_date",    F.lit(None).cast("date"))
+        .withColumn("is_current",            F.lit(True))
+        .select(
+            "customer_key","customer_id","first_name","last_name",
+            "company","address","city","state","country","postal_code",
+            "phone","fax","email","support_rep_key",
+            "effective_start_date","effective_end_date","is_current"
+        )
     )
-
+ 
     (first_run_df.write.format("delta").mode("overwrite")
          .option("overwriteSchema","true")
          .saveAsTable(f"{g}.dim_customer"))
-
+ 
 else:
     # ── SUBSEQUENT RUNS — SCD2 MERGE ─────────────────────────────
     print("Existing dim_customer found — running SCD2 MERGE.")
-
+ 
     dim_customer = DeltaTable.forName(spark, f"{g}.dim_customer")
-
+ 
     # Step 1: Expire changed current records
     # Build change detection condition
     change_conditions = " OR ".join([
         f"existing.{c} <> incoming.{c}" for c in SCD2_COLS
     ])
-
+ 
     dim_customer.alias("existing").merge(
         incoming_df.alias("incoming"),
         "existing.customer_id = incoming.customer_id AND existing.is_current = true"
@@ -290,18 +276,18 @@ else:
             "is_current"         : F.lit(False)
         }
     ).execute()
-
+ 
     # Step 2: Insert new records for changed + new customers
     # Get max surrogate key to continue sequence
     max_key = spark.sql(f"SELECT MAX(customer_key) AS mk FROM {g}.dim_customer").collect()[0]["mk"] or 0
-
+ 
     # Find customers that are changed or brand new
     new_records_df = incoming_df.alias("inc").join(
         spark.read.table(f"{g}.dim_customer").filter("is_current = true").alias("dim"),
         F.col("inc.customer_id") == F.col("dim.customer_id"),
         "left_anti"   # customers not in current dim = new or just expired
     )
-
+ 
     if new_records_df.count() > 0:
         w = Window.orderBy("customer_id")
         new_records_df = (new_records_df
@@ -314,19 +300,20 @@ else:
                     "phone","fax","email","support_rep_key",
                     "effective_start_date","effective_end_date","is_current")
         )
-
+ 
         (new_records_df.write.format("delta").mode("append")
              .saveAsTable(f"{g}.dim_customer"))
-
+ 
         print(f"  New/changed records inserted: {new_records_df.count()}")
     else:
         print("  No changes detected — dim_customer is up to date.")
-
+ 
 cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_customer").collect()[0]["c"]
 current_cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_customer WHERE is_current = true").collect()[0]["c"]
 print(f"dim_customer    : {cnt} total rows | {current_cnt} current")
 
 # COMMAND ----------
+
 # MAGIC %md ## 8 — dim_track
 
 # COMMAND ----------
@@ -357,6 +344,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.dim_track").collect()[0]["c"]
 print(f"dim_track       : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## 9 — fact_sales (grain: one row per invoice line)
 
 # COMMAND ----------
@@ -393,6 +381,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.fact_sales").collect()[0]["c"]
 print(f"fact_sales      : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## 10 — fact_sales_customer_agg
 # MAGIC Built FROM fact_sales — never directly from Silver.
 
@@ -421,6 +410,7 @@ cnt = spark.sql(f"SELECT COUNT(*) AS c FROM {g}.fact_sales_customer_agg").collec
 print(f"fact_sales_customer_agg : {cnt} rows")
 
 # COMMAND ----------
+
 # MAGIC %md ## Final summary
 
 # COMMAND ----------

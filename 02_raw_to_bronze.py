@@ -1,6 +1,8 @@
 # Databricks notebook source
 
+
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC # 03 — Raw to Bronze
 # MAGIC Reads the latest Parquet snapshot from the Raw Volume for each table
@@ -28,6 +30,7 @@ print(f"schema_name   : {schema_name}")
 print(f"bronze_schema : {bronze_schema}")
 
 # COMMAND ----------
+
 # MAGIC %md ## Read latest file_location for each table from child metrics table
 # MAGIC
 # MAGIC We pick the most recent SUCCESS row per table — this gives us
@@ -55,6 +58,7 @@ print(f"Tables to load into Bronze: {latest_files_df.count()}")
 latest_files_df.show(truncate=False)
 
 # COMMAND ----------
+
 # MAGIC %md ## Read each Parquet file and write to Bronze Delta table
 
 # COMMAND ----------
@@ -109,6 +113,7 @@ for row in tables:
         summary.append({"table": table_name, "rows": 0, "status": "FAILED"})
 
 # COMMAND ----------
+
 # MAGIC %md ## Summary
 
 # COMMAND ----------
