@@ -1,6 +1,4 @@
 # Databricks notebook source
-
-# COMMAND ----------
 # MAGIC %md
 # MAGIC # 03 — Bronze to Silver
 # MAGIC Runs DQX profiling and quality validation on each Bronze table,
@@ -35,6 +33,7 @@ print(f"silver_schema  : {silver_schema}")
 print(f"control_schema : {control_schema}")
 
 # COMMAND ----------
+
 # MAGIC %md ## Helper — DQX profiling function
 # MAGIC Analyses a DataFrame and prints a profile report.
 # MAGIC Returns a dict of profile stats.
@@ -75,6 +74,7 @@ def profile_dataframe(df, table_name):
 
 
 # COMMAND ----------
+
 # MAGIC %md ## Quality rules per table
 # MAGIC
 # MAGIC Each rule is a Spark filter condition (string).
@@ -142,6 +142,7 @@ QUALITY_RULES = {
 
 
 # COMMAND ----------
+
 # MAGIC %md ## Cleaning transformations per table
 # MAGIC
 # MAGIC Applied only to records that PASS DQX rules.
@@ -202,7 +203,7 @@ def clean_dataframe(df, table_name):
         )
 
     elif table_name == "invoiceline":
-        return df  # all columns are numeric — no string cleaning needed
+        return df
 
     elif table_name == "mediatype":
         return df.withColumn("Name", F.trim(F.coalesce(F.col("Name"), F.lit("Unknown"))))
@@ -211,7 +212,7 @@ def clean_dataframe(df, table_name):
         return df.withColumn("Name", F.trim(F.coalesce(F.col("Name"), F.lit("Unknown"))))
 
     elif table_name == "playlisttrack":
-        return df  # only integer keys — no cleaning needed
+        return df
 
     elif table_name == "track":
         return (df
@@ -219,10 +220,11 @@ def clean_dataframe(df, table_name):
             .withColumn("Composer", F.trim(F.coalesce(F.col("Composer"), F.lit("Unknown"))))
         )
 
-    return df  # fallback — return as-is
+    return df  # fallback
 
 
 # COMMAND ----------
+
 # MAGIC %md ## Main loop — process each Bronze table
 
 # COMMAND ----------
@@ -280,13 +282,9 @@ for table_name in sorted(bronze_tables):
 
         # ── 4. Write failed records to quarantine ─────────────────
         if failed_count > 0:
-            # Tag each failed record with the first rule it violated
             quarantine_rows = []
             for rule_name, col_name, expr in rules:
                 violators = bronze_df.filter(f"NOT ({expr})").filter(pass_condition if passed_count > 0 else "1=1")
-                # Simpler approach: write all failed records once with combined reason
-            
-            # Write quarantine records with metadata columns added
             quar_df = (failed_df
                 .withColumn("table_name",     F.lit(table_name))
                 .withColumn("execution_time", F.lit(execution_time.isoformat()))
@@ -351,6 +349,7 @@ for table_name in sorted(bronze_tables):
                          "failed": 0, "silver": 0, "status": "FAILED"})
 
 # COMMAND ----------
+
 # MAGIC %md ## Summary
 
 # COMMAND ----------
